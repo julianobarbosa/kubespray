@@ -94,11 +94,7 @@ def calculate_mantl_vars(func):
         name, attrs, groups = func(*args, **kwargs)
 
         # attrs
-        if attrs.get('role', '') == 'control':
-            attrs['consul_is_server'] = True
-        else:
-            attrs['consul_is_server'] = False
-
+        attrs['consul_is_server'] = attrs.get('role', '') == 'control'
         # groups
         if attrs.get('publicly_routable', False):
             groups.append('publicly_routable')
@@ -153,8 +149,6 @@ def parse_bool(string_form):
 def packet_device(resource, tfvars=None):
     raw_attrs = resource['primary']['attributes']
     name = raw_attrs['hostname']
-    groups = []
-
     attrs = {
         'id': raw_attrs['id'],
         'facilities': parse_list(raw_attrs, 'facilities'),
@@ -177,25 +171,24 @@ def packet_device(resource, tfvars=None):
         'provider': 'packet',
     }
 
-    # add groups based on attrs
-    groups.append('packet_operating_system=' + attrs['operating_system'])
-    groups.append('packet_locked=%s' % attrs['locked'])
-    groups.append('packet_state=' + attrs['state'])
-    groups.append('packet_plan=' + attrs['plan'])
-
+    groups = [
+        'packet_operating_system=' + attrs['operating_system'],
+        f"packet_locked={attrs['locked']}",
+        'packet_state=' + attrs['state'],
+        'packet_plan=' + attrs['plan'],
+    ]
     # groups specific to kubespray
-    groups = groups + attrs['tags']
+    groups += attrs['tags']
 
     return name, attrs, groups
 
 
 def openstack_floating_ips(resource):
     raw_attrs = resource['primary']['attributes']
-    attrs = {
+    return {
         'ip': raw_attrs['floating_ip'],
         'instance_id': raw_attrs['instance_id'],
     }
-    return attrs
 
 def openstack_floating_ips(resource):
     raw_attrs = resource['primary']['attributes']
@@ -206,8 +199,6 @@ def openstack_floating_ips(resource):
 def openstack_host(resource, module_name):
     raw_attrs = resource['primary']['attributes']
     name = raw_attrs['name']
-    groups = []
-
     attrs = {
         'access_ip_v4': raw_attrs['access_ip_v4'],
         'access_ip_v6': raw_attrs['access_ip_v6'],
@@ -239,12 +230,12 @@ def openstack_host(resource, module_name):
         attrs['private_ipv4'] = raw_attrs['network.0.fixed_ip_v4']
 
     try:
-        attrs.update({
+        attrs |= {
             'ansible_ssh_host': raw_attrs['access_ip_v4'],
             'publicly_routable': True,
-        })
+        }
     except (KeyError, ValueError):
-        attrs.update({'ansible_ssh_host': '', 'publicly_routable': False})
+        attrs |= {'ansible_ssh_host': '', 'publicly_routable': False}
 
     # Handling of floating IPs has changed: https://github.com/terraform-providers/terraform-provider-openstack/blob/master/CHANGELOG.md#010-june-21-2017
 
@@ -255,34 +246,35 @@ def openstack_host(resource, module_name):
     if 'volume.#' in raw_attrs.keys() and int(raw_attrs['volume.#']) > 0:
         device_index = 1
         for key, value in raw_attrs.items():
-            match = re.search("^volume.*.device$", key)
-            if match:
-                attrs['disk_volume_device_'+str(device_index)] = value
+            if match := re.search("^volume.*.device$", key):
+                attrs[f'disk_volume_device_{str(device_index)}'] = value
                 device_index += 1
 
 
     # attrs specific to Mantl
-    attrs.update({
+    attrs |= {
         'consul_dc': _clean_dc(attrs['metadata'].get('dc', module_name)),
         'role': attrs['metadata'].get('role', 'none'),
-        'ansible_python_interpreter': attrs['metadata'].get('python_bin','python')
-    })
+        'ansible_python_interpreter': attrs['metadata'].get(
+            'python_bin', 'python'
+        ),
+    }
 
-    # add groups based on attrs
-    groups.append('os_image=' + attrs['image']['name'])
-    groups.append('os_flavor=' + attrs['flavor']['name'])
+    groups = [
+        'os_image=' + attrs['image']['name'],
+        'os_flavor=' + attrs['flavor']['name'],
+    ]
     groups.extend('os_metadata_%s=%s' % item
                   for item in attrs['metadata'].items())
-    groups.append('os_region=' + attrs['region'])
-
-    # groups specific to Mantl
-    groups.append('role=' + attrs['metadata'].get('role', 'none'))
-    groups.append('dc=' + attrs['consul_dc'])
-
+    groups.extend(
+        (
+            'os_region=' + attrs['region'],
+            'role=' + attrs['metadata'].get('role', 'none'),
+            'dc=' + attrs['consul_dc'],
+        )
+    )
     # groups specific to kubespray
-    for group in attrs['metadata'].get('kubespray_groups', "").split(","):
-        groups.append(group)
-
+    groups.extend(iter(attrs['metadata'].get('kubespray_groups', "").split(",")))
     return name, attrs, groups
 
 
@@ -303,11 +295,7 @@ def iter_host_ips(hosts, ips):
 
 ## QUERY TYPES
 def query_host(hosts, target):
-    for name, attrs, _ in hosts:
-        if name == target:
-            return attrs
-
-    return {}
+    return next((attrs for name, attrs, _ in hosts if name == target), {})
 
 
 def query_list(hosts):
@@ -332,7 +320,7 @@ def query_list(hosts):
 def query_hostfile(hosts):
     out = ['## begin hosts generated by terraform.py ##']
     out.extend(
-        '{}\t{}'.format(attrs['ansible_ssh_host'].ljust(16), name)
+        f"{attrs['ansible_ssh_host'].ljust(16)}\t{name}"
         for name, attrs, _ in hosts
     )
 
@@ -371,15 +359,12 @@ def main():
     args = parser.parse_args()
 
     if args.version:
-        print('%s %s' % (__file__, VERSION))
+        print(f'{__file__} {VERSION}')
         parser.exit()
 
     hosts = iterhosts(iterresources(tfstates(args.root)))
 
-    # Perform a second pass on the file to pick up floating_ip entries to update the ip address of referenced hosts
-    ips = dict(iterips(iterresources(tfstates(args.root))))
-
-    if ips:
+    if ips := dict(iterips(iterresources(tfstates(args.root)))):
         hosts = iter_host_ips(hosts, ips)
 
     if args.list:

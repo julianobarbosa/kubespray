@@ -225,10 +225,10 @@ class KubesprayInventory(object):
         return hostname in existing_hosts.keys()
 
     def exists_ip(self, existing_hosts, ip):
-        for host_opts in existing_hosts.values():
-            if ip == self.get_ip_from_opts(host_opts):
-                return True
-        return False
+        return any(
+            ip == self.get_ip_from_opts(host_opts)
+            for host_opts in existing_hosts.values()
+        )
 
     def delete_host_by_ip(self, existing_hosts, ip):
         for hostname, host_opts in existing_hosts.items():
@@ -380,9 +380,10 @@ MASSIVE_SCALE_THRESHOLD Separate K8s master and ETCD if # of nodes >= 200
         yaml.dump(self.yaml_config, sys.stdout)
 
     def print_ips(self):
-        ips = []
-        for host, opts in self.yaml_config['all']['hosts'].items():
-            ips.append(self.get_ip_from_opts(opts))
+        ips = [
+            self.get_ip_from_opts(opts)
+            for host, opts in self.yaml_config['all']['hosts'].items()
+        ]
         print(' '.join(ips))
 
 

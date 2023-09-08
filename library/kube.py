@@ -145,15 +145,14 @@ class KubeManager(object):
                     msg='error running kubectl (%s) command (rc=%d), out=\'%s\', err=\'%s\'' % (' '.join(args), rc, out, err))
         except Exception as exc:
             self.module.fail_json(
-                msg='error running kubectl (%s) command: %s' % (' '.join(args), str(exc)))
+                msg=f"error running kubectl ({' '.join(args)}) command: {str(exc)}"
+            )
         return out.splitlines()
 
     def _execute_nofail(self, cmd):
         args = self.base_cmd + cmd
         rc, out, err = self.module.run_command(args)
-        if rc != 0:
-            return None
-        return out.splitlines()
+        return None if rc != 0 else out.splitlines()
 
     def create(self, check=True, force=True):
         if check and self.exists():
@@ -165,7 +164,7 @@ class KubeManager(object):
             cmd.append('--force')
 
         if self.recursive:
-            cmd.append('--recursive={}'.format(self.recursive))
+            cmd.append(f'--recursive={self.recursive}')
 
         if not self.filename:
             self.module.fail_json(msg='filename required to create')
@@ -182,7 +181,7 @@ class KubeManager(object):
             cmd.append('--force')
 
         if self.recursive:
-            cmd.append('--recursive={}'.format(self.recursive))
+            cmd.append(f'--recursive={self.recursive}')
 
         if not self.filename:
             self.module.fail_json(msg='filename required to reload')
@@ -200,8 +199,6 @@ class KubeManager(object):
 
         if self.filename:
             cmd.append('--filename=' + ','.join(self.filename))
-            if self.recursive:
-                cmd.append('--recursive={}'.format(self.recursive))
         else:
             if not self.resource:
                 self.module.fail_json(msg='resource required to delete without filename')
@@ -212,7 +209,7 @@ class KubeManager(object):
                 cmd.append(self.name)
 
             if self.label:
-                cmd.append('--selector=' + self.label)
+                cmd.append(f'--selector={self.label}')
 
             if self.all:
                 cmd.append('--all')
@@ -220,9 +217,8 @@ class KubeManager(object):
             if self.force:
                 cmd.append('--ignore-not-found')
 
-            if self.recursive:
-                cmd.append('--recursive={}'.format(self.recursive))
-
+        if self.recursive:
+            cmd.append(f'--recursive={self.recursive}')
         return self._execute(cmd)
 
     def exists(self):
@@ -231,7 +227,7 @@ class KubeManager(object):
         if self.filename:
             cmd.append('--filename=' + ','.join(self.filename))
             if self.recursive:
-                cmd.append('--recursive={}'.format(self.recursive))
+                cmd.append(f'--recursive={self.recursive}')
         else:
             if not self.resource:
                 self.module.fail_json(msg='resource required without filename')
@@ -242,7 +238,7 @@ class KubeManager(object):
                 cmd.append(self.name)
 
             if self.label:
-                cmd.append('--selector=' + self.label)
+                cmd.append(f'--selector={self.label}')
 
             if self.all:
                 cmd.append('--all-namespaces')
@@ -250,9 +246,7 @@ class KubeManager(object):
         cmd.append('--no-headers')
 
         result = self._execute_nofail(cmd)
-        if not result:
-            return False
-        return True
+        return bool(result)
 
     # TODO: This is currently unused, perhaps convert to 'scale' with a replicas param?
     def stop(self):
@@ -265,7 +259,7 @@ class KubeManager(object):
         if self.filename:
             cmd.append('--filename=' + ','.join(self.filename))
             if self.recursive:
-                cmd.append('--recursive={}'.format(self.recursive))
+                cmd.append(f'--recursive={self.recursive}')
         else:
             if not self.resource:
                 self.module.fail_json(msg='resource required to stop without filename')
@@ -276,7 +270,7 @@ class KubeManager(object):
                 cmd.append(self.name)
 
             if self.label:
-                cmd.append('--selector=' + self.label)
+                cmd.append(f'--selector={self.label}')
 
             if self.all:
                 cmd.append('--all')
@@ -291,21 +285,24 @@ def main():
 
     module = AnsibleModule(
         argument_spec=dict(
-            name=dict(),
+            name={},
             filename=dict(type='list', aliases=['files', 'file', 'filenames']),
-            namespace=dict(),
-            resource=dict(),
-            label=dict(),
-            server=dict(),
-            kubectl=dict(),
+            namespace={},
+            resource={},
+            label={},
+            server={},
+            kubectl={},
             force=dict(default=False, type='bool'),
             all=dict(default=False, type='bool'),
             log_level=dict(default=0, type='int'),
-            state=dict(default='present', choices=['present', 'absent', 'latest', 'reloaded', 'stopped']),
-            recursive=dict(default=False, type='bool'),
+            state=dict(
+                default='present',
+                choices=['present', 'absent', 'latest', 'reloaded', 'stopped'],
             ),
-            mutually_exclusive=[['filename', 'list']]
-        )
+            recursive=dict(default=False, type='bool'),
+        ),
+        mutually_exclusive=[['filename', 'list']],
+    )
 
     changed = False
 
@@ -327,11 +324,9 @@ def main():
         result = manager.replace()
 
     else:
-        module.fail_json(msg='Unrecognized state %s.' % state)
+        module.fail_json(msg=f'Unrecognized state {state}.')
 
-    module.exit_json(changed=changed,
-                     msg='success: %s' % (' '.join(result))
-                     )
+    module.exit_json(changed=changed, msg=f"success: {' '.join(result)}")
 
 
 from ansible.module_utils.basic import *  # noqa

@@ -31,19 +31,26 @@ class SearchEC2Tags(object):
     self.args = parser.parse_args()
 
   def search_tags(self):
-    hosts = {}
-    hosts['_meta'] = { 'hostvars': {} }
-
+    hosts = {'_meta': {'hostvars': {}}}
+    tag_key = "kubespray-role"
     ##Search ec2 three times to find nodes of each group type. Relies on kubespray-role key/value.
     for group in ["kube-master", "kube-node", "etcd"]:
       hosts[group] = []
-      tag_key = "kubespray-role"
-      tag_value = ["*"+group+"*"]
+      tag_value = [f"*{group}*"]
       region = os.environ['REGION']
 
       ec2 = boto3.resource('ec2', region)
 
-      instances = ec2.instances.filter(Filters=[{'Name': 'tag:'+tag_key, 'Values': tag_value}, {'Name': 'instance-state-name', 'Values': ['running']}])
+      instances = ec2.instances.filter(Filters=[
+          {
+              'Name': f'tag:{tag_key}',
+              'Values': tag_value
+          },
+          {
+              'Name': 'instance-state-name',
+              'Values': ['running']
+          },
+      ])
       for instance in instances:
 
         ##Suppose default vpc_visibility is private
@@ -59,14 +66,14 @@ class SearchEC2Tags(object):
             'ansible_ssh_host': instance.public_ip_address
           }
 
-        ##Set when instance actually has node_labels
-        node_labels_tag = list(filter(lambda t: t['Key'] == 'kubespray-node-labels', instance.tags))
-        if node_labels_tag:
+        if node_labels_tag := list(
+            filter(lambda t: t['Key'] == 'kubespray-node-labels',
+                   instance.tags)):
           ansible_host['node_labels'] = dict([ label.strip().split('=') for label in node_labels_tag[0]['Value'].split(',') ])
 
         hosts[group].append(dns_name)
         hosts['_meta']['hostvars'][dns_name] = ansible_host
-        
+
     hosts['k8s-cluster'] = {'children':['kube-master', 'kube-node']}
     print(json.dumps(hosts, sort_keys=True, indent=2))
 
